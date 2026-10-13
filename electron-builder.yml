@@ -1,0 +1,22 @@
+appId: com.tiijeij8.pzmaplanserver
+productName: PZ Map LAN Server
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: assets/app-icon.png
+    to: assets/app-icon.png
+win:
+  icon: assets/app-icon.ico
+  artifactName: PZ-Map-LAN-Server-${version}-${arch}-Portable.${ext}
+  target:
+    - nsis
+    - zip
+nsis:
+  installerIcon: assets/app-icon.ico
+  uninstallerIcon: assets/app-icon.ico
+  artifactName: PZ-Map-LAN-Server-${version}-${arch}-Setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
