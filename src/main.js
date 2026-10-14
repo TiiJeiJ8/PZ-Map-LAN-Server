@@ -1,3 +1,4 @@
+import { extraMessages } from './messages-extra.js'
 import { createApp } from 'vue'
 import { createI18n } from 'vue-i18n'
 import App from './App.vue'
@@ -85,5 +86,6 @@ const messages = {
     chooseDirectoryError: 'Unable to open the directory picker: {message}',
   },
 }
+for (const language of Object.keys(messages)) Object.assign(messages[language], extraMessages[language])
 const lang = navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
 createApp(App).use(createI18n({ legacy: false, locale: lang, fallbackLocale: 'en', messages })).mount('#app')

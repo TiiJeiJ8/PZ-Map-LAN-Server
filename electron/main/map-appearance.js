@@ -110,7 +110,7 @@ function installAppearance(initial, dictionary, embeddedPreferences) {
   const originals = new WeakMap()
   let observer
   let stream
-  let lastSaved = ''
+  let lastSaved = '', preferenceTimer
   function rememberPreferences() {
     if (!embeddedPreferences || window.parent === window) return
     try {
@@ -194,12 +194,19 @@ function installAppearance(initial, dictionary, embeddedPreferences) {
   }
   if (embeddedPreferences) {
     for (const type of ['click', 'change', 'input', 'keydown']) {
-      document.addEventListener(type, () => queueMicrotask(rememberPreferences))
+      document.addEventListener(type, event => {
+        if (type === 'keydown') {
+          if (event.repeat || event.target.closest?.('input, textarea, select, [contenteditable]')) return
+        } else if (!event.target.closest?.(scope)) return
+        clearTimeout(preferenceTimer)
+        // Coalesce slider input and the click/change pair; read after mod handlers.
+        preferenceTimer = setTimeout(rememberPreferences, type === 'input' ? 200 : 0)
+      })
     }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true })
   else mount()
-  window.addEventListener('pagehide', () => { stream?.close(); observer?.disconnect() })
+  window.addEventListener('pagehide', () => { clearTimeout(preferenceTimer); rememberPreferences(); stream?.close(); observer?.disconnect() })
   window.addEventListener('pageshow', event => { if (event.persisted) mount() })
 }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineComponent, h, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import { version } from '../package.json'
 import { useI18n } from 'vue-i18n'
@@ -7,7 +7,8 @@ import './style.css'
 import appIcon from '../assets/app-icon.svg'
 import { applyTheme, normalizeTheme } from './theme.js'
 import { MapLocation, Connection, Setting, InfoFilled, Minus, CopyDocument, Close, Fold, Check, WarningFilled, Link, Iphone, FullScreen, Lock, FolderOpened } from '@element-plus/icons-vue'
-const { t, locale } = useI18n()
+const { t, locale, te } = useI18n()
+function message(error) { const code = error?.message?.match(/PZ:([A-Z_]+)/)?.[1] || error?.code; return code && te('error_' + code) ? t('error_' + code) : t('error_OPERATION_FAILED') }
 const ElIcon = defineComponent({
   name: 'AppIcon',
   inheritAttrs: false,
@@ -15,15 +16,107 @@ const ElIcon = defineComponent({
     return () => h('span', { 'aria-hidden': true, ...attrs, class: ['el-icon', attrs.class] }, slots.default?.())
   },
 })
-const active = ref('map'); const sidebar = ref(true); const config = ref({ webDir: '', dataDir: '', port: 8123 }); const validation = ref({ webValid: false, dataValid: false }); const status = ref({ running: false }); const qr = ref(''); const copied = ref(false); const profiles = ref([]); const firewallDone = ref(false); const error = ref('')
+const active = ref('map'); const sidebar = ref(true); const config = ref({ webDir: '', dataDir: '', port: 8123, closeBehavior: 'quit', uiScale: 100, preferredIp: '' }); const validation = ref({ webValid: false, dataValid: false }); const status = ref({ running: false }); const qr = ref(''); const copied = ref(false); const profiles = ref([]); const firewallDone = ref(false); const firewallBusy = ref(false); const error = ref('')
 const ready = computed(() => validation.value.webValid && validation.value.dataValid)
-const webUrl = computed(() => status.value.url || '')
+const webUrl = computed(() => status.value.running ? status.value.url || '' : '')
 const previewUrl = ref('')
 const mapIframe = ref(null)
+let previewTimer, statusTimer, previewRequest = 0, statusRequest = 0, polling = false, profilesAt = 0, profilesPending = false
+const initialized = ref(false)
+const previewSuspended = ref(false)
+let suspendTimer, suspendRequest = 0, mapState = null, lifecycleReady = false, disposed = false
+function postToMap(message) {
+  if (previewUrl.value) mapIframe.value?.contentWindow?.postMessage(message, new URL(previewUrl.value).origin)
+}
+function syncMapActivity() {
+  postToMap({ type: 'pz-lan-map-activity', active: !document.hidden && active.value === 'map' })
+}
+function updateActivity() {
+  clearTimeout(statusTimer)
+  clearTimeout(suspendTimer)
+  suspendRequest++
+  if (document.hidden) {
+    suspendTimer = setTimeout(() => {
+      // Unsupported maps stay mounted: never discard a view we cannot restore.
+      if (document.hidden && lifecycleReady && !previewSuspended.value) postToMap({ type: 'pz-lan-map-suspend', request: suspendRequest })
+    }, 60000)
+  } else {
+    if (active.value === 'map') previewSuspended.value = false
+    if (initialized.value) void pollStatus()
+  }
+  syncMapActivity()
+}
+watch(active, updateActivity)
+watch(previewUrl, () => { mapState = null; lifecycleReady = false; suspendRequest++ })
+const previewRetained = ref(false)
+const statusError = ref(false)
+const game = computed(() => status.value.game || { state: 'waiting', updatedAt: null })
+const compatibility = computed(() => status.value.compatibility || { state: 'checking', version: '' })
+const networkChoices = computed(() => status.value.adapters || [])
+const formattedTime = value => value ? new Date(value).toLocaleString(locale.value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'
+const connectionIssue = computed(() => statusError.value ? 'STATUS_UNAVAILABLE' : status.value.code || (!status.value.url ? 'NO_NETWORK' : ''))
+async function pollStatus() {
+  if (disposed || document.hidden || polling || !window.pz?.server?.status) return
+  clearTimeout(statusTimer)
+  polling = true
+  const request = ++statusRequest
+  try {
+    const result = await window.pz.server.status()
+    if (request === statusRequest) { status.value = result; statusError.value = false }
+    if (active.value === 'share' && !document.hidden) void refreshProfiles()
+  }
+  catch { statusError.value = true }
+  finally {
+    polling = false
+    if (!disposed && !document.hidden) statusTimer = setTimeout(pollStatus, active.value === 'share' ? 3000 : 15000)
+  }
+}
+async function refreshProfiles() {
+  if (profilesPending || Date.now() - profilesAt < 60000) return
+  profilesPending = true
+  try {
+    const result = await window.pz.network?.profiles?.()
+    if (!disposed) profiles.value = Array.isArray(result) ? result : result ? [result] : []
+  } catch { /* A network-profile lookup must not invalidate game status. */ }
+  finally { profilesAt = Date.now(); profilesPending = false }
+}
+watch(webUrl, async (url, _, onCleanup) => {
+  let cancelled = false
+  onCleanup(() => { cancelled = true })
+  if (!url || !status.value.running) { qr.value = ''; return }
+  try { const image = await QRCode.toDataURL(url, { margin: 1, width: 220 }); if (!cancelled) qr.value = image }
+  catch (e) { error.value = message(e) }
+})
+async function savePreference(key, value) {
+  const previous = config.value[key]
+  config.value[key] = value
+  try { await window.pz.config.save({ [key]: value }); if (key === 'preferredIp') await pollStatus() }
+  catch (e) { config.value[key] = previous; error.value = message(e) }
+}
+async function toggleSidebar() {
+  sidebar.value = !sidebar.value
+  await savePreference('sidebarOpen', sidebar.value)
+  sidebar.value = config.value.sidebarOpen
+}
+
 function rememberMapPreferences(event) {
   if (!previewUrl.value || event.source !== mapIframe.value?.contentWindow || event.origin !== new URL(previewUrl.value).origin) return
+  if (event.data?.type === 'pz-lan-map-ready') {
+    lifecycleReady = true
+    postToMap({ type: 'pz-lan-map-activity', active: !document.hidden && active.value === 'map', state: mapState })
+    mapState = null
+    return
+  }
+  if (event.data?.type === 'pz-lan-map-snapshot') {
+    if (document.hidden && event.data.request === suspendRequest) {
+      mapState = event.data.state
+      previewSuspended.value = true
+      lifecycleReady = false
+    }
+    return
+  }
   if (event.data?.type !== 'pz-lan-map-preferences') return
-  void window.pz.config.save({ mapPreferences: event.data.values }).catch(e => { error.value = e.message })
+  void window.pz.config.save({ mapPreferences: event.data.values }).catch(e => { error.value = message(e) })
 }
 const saved = ref(false)
 const saving = ref(false)
@@ -48,7 +141,7 @@ async function switchTheme(theme) {
   applyTheme(theme)
   error.value = ''
   try { await window.pz.config.save({ theme }) }
-  catch (e) { config.value.theme = previous; applyTheme(previous); error.value = e.message }
+  catch (e) { config.value.theme = previous; applyTheme(previous); error.value = message(e) }
   finally { themeSaving.value = false }
 }
 let savedTimer
@@ -60,7 +153,7 @@ const navItems = [
 const navIndex = computed(() => navItems.findIndex(item => item.key === active.value))
 const shareLabel = computed(() => shareAction.value || (status.value.running ? 'stop' : 'start'))
 const saveLabel = computed(() => saving.value ? 'saving' : saved.value ? 'settingsSaved' : 'save')
-onUnmounted(() => { clearTimeout(savedTimer); clearTimeout(copiedTimer); clearTimeout(splashTimer); window.removeEventListener('message', rememberMapPreferences) })
+onUnmounted(() => { clearTimeout(savedTimer); clearTimeout(copiedTimer); clearTimeout(splashTimer); clearTimeout(previewTimer); clearTimeout(statusTimer); clearTimeout(suspendTimer); disposed = true; previewRequest++; statusRequest++; document.removeEventListener('visibilitychange', updateActivity); window.removeEventListener('message', rememberMapPreferences) })
 const workspace = ref(null)
 watch(active, () => workspace.value?.scrollTo({ top: 0 }), { flush: 'post' })
 const featureItems = [
@@ -74,16 +167,18 @@ function openExternal(url) { void window.pz.preview.open(url) }
 // Send a plain snapshot across the contextBridge boundary.
 const configSnapshot = () => ({ ...config.value })
 async function validate() {
+  const snapshot = configSnapshot()
   try {
     if (!window.pz?.config?.validate) throw new Error(t('desktopUnavailable'))
-    validation.value = await window.pz.config.validate(configSnapshot())
-  } catch (e) { error.value = e.message }
+    const result = await window.pz.config.validate(snapshot)
+    if (snapshot.webDir === config.value.webDir && snapshot.dataDir === config.value.dataDir) validation.value = result
+  } catch (e) { error.value = message(e) }
 }
 async function choose(key) {
   try {
     const dir = await window.pz.dialog.directory()
     if (dir) { config.value[key] = dir; await validate(); await window.pz.config.save(configSnapshot()) }
-  } catch (e) { error.value = t('chooseDirectoryError', { message: e.message }) }
+  } catch (e) { error.value = t('chooseDirectoryError', { message: message(e) }) }
 }
 async function save() { await window.pz.config.save(configSnapshot()); await validate() }
 async function saveSettings() {
@@ -97,23 +192,25 @@ async function saveSettings() {
     await save()
     saved.value = snapshot === JSON.stringify(configSnapshot())
     savedTimer = setTimeout(() => { saved.value = false }, 1800)
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = message(e) }
   finally { saving.value = false }
 }
 watch(() => [config.value.webDir, config.value.dataDir, config.value.port], () => { saved.value = false })
 async function start() {
   if (sharingBusy.value) return
+  statusRequest++
   shareAction.value = 'starting'
   error.value = ''
   try {
     await save()
     status.value = { running: true, ...(await window.pz.server.start(configSnapshot())) }
-    qr.value = await QRCode.toDataURL(status.value.url, { margin: 1, width: 220 })
-  } catch (e) { error.value = e.message }
+    await pollStatus()
+  } catch (e) { error.value = message(e) }
   finally { shareAction.value = '' }
 }
 async function stop() {
   if (sharingBusy.value) return
+  statusRequest++
   shareAction.value = 'stopping'
   error.value = ''
   try {
@@ -122,7 +219,7 @@ async function stop() {
     qr.value = ''
     copied.value = false
     clearTimeout(copiedTimer)
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = message(e) }
   finally { shareAction.value = '' }
 }
 async function copy() {
@@ -134,50 +231,76 @@ async function copy() {
     copied.value = true
     clearTimeout(copiedTimer)
     copiedTimer = setTimeout(() => { copied.value = false }, 1600)
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = message(e) }
   finally { copying.value = false }
 }
-async function firewall() { const r = await window.pz.firewall.add(config.value.port); firewallDone.value = r.ok; if (!r.ok) error.value = r.error }
+async function firewall() {
+  if (firewallBusy.value) return
+  firewallBusy.value = true; firewallDone.value = false; error.value = ''
+  try {
+    const result = await window.pz.firewall.add(status.value.running ? status.value.port : config.value.port)
+    firewallDone.value = result.ok
+    if (!result.ok) error.value = message(result)
+  } catch (e) { error.value = message(e) }
+  finally { firewallBusy.value = false }
+}
+watch(() => [config.value.port, status.value.port], () => { firewallDone.value = false })
 async function minimizeWindow() { await window.pz?.window?.minimize?.() }
 async function toggleMaximizeWindow() { await window.pz?.window?.toggleMaximize?.() }
 async function closeWindow() { await window.pz?.window?.close?.() }
 async function detect() {
+  const initialPath = config.value.webDir
   const result = await window.pz.config.detect()
-  if (result?.config?.webDir && !config.value.webDir) config.value.webDir = result.config.webDir
+  if (result?.config?.webDir && config.value.webDir === initialPath) config.value.webDir = result.config.webDir
   await validate()
 }
 async function refreshPreview() {
   if (!window.pz?.preview?.refresh) return
-  const result = await window.pz.preview.refresh(configSnapshot())
-  previewUrl.value = result.url
-  validation.value = result.validation
+  clearTimeout(previewTimer)
+  const request = ++previewRequest
+  try {
+    const result = await window.pz.preview.refresh(configSnapshot())
+    if (request !== previewRequest || result.stale) return
+    previewUrl.value = result.url; validation.value = result.validation
+    previewRetained.value = Boolean(result.retained)
+  } catch (e) { if (request === previewRequest) error.value = message(e) }
 }
-watch(() => [config.value.webDir, config.value.dataDir], () => { void refreshPreview() })
+watch(() => [config.value.webDir, config.value.dataDir], () => {
+  if (!initialized.value) return
+  previewRequest++
+  clearTimeout(previewTimer)
+  previewTimer = setTimeout(refreshPreview, 400)
+})
 async function switchLang(language = locale.value === 'zh-CN' ? 'en' : 'zh-CN') {
   locale.value = language
   config.value.language = language
-  try { await window.pz.config.save({ language }) } catch (e) { error.value = e.message }
+  try { await window.pz.config.save({ language }) } catch (e) { error.value = message(e) }
 }
 onMounted(async () => {
   window.addEventListener('message', rememberMapPreferences)
+  document.addEventListener('visibilitychange', updateActivity)
   splashStarted = performance.now()
   // Always expose the usable shell, even if IPC or drive discovery stalls.
   splashTimer = setTimeout(() => { splashVisible.value = false }, 900)
   try {
     if (!window.pz?.config?.get) throw new Error(t('desktopUnavailable'))
-    config.value = await window.pz.config.get()
+    config.value = { ...config.value, ...(await window.pz.config.get()) }
     config.value.theme = normalizeTheme(config.value.theme)
+    sidebar.value = config.value.sidebarOpen !== false
     applyTheme(config.value.theme)
     if (config.value.language === 'zh-CN' || config.value.language === 'en') locale.value = config.value.language
     revealInterface()
+    await nextTick()
+    initialized.value = true
+    if (config.value.webDir) void refreshPreview()
+    updateActivity()
+    // Directory changes schedule their own refresh. Do not reload the same map.
     await detect()
-    profiles.value = await window.pz.network.profiles()
-    await refreshPreview()
-  } catch (e) { error.value = e.message; revealInterface() }
+  } catch (e) { error.value = message(e); revealInterface() }
 })
 </script>
 <template>
-  <main class="shell">
+  <main class="shell" :style="{ '--ui-scale': (config.uiScale || 100) / 100 }">
     <div class="titlebar">
       <span class="titlebar-name"><img class="titlebar-mark" :src="appIcon" alt="" />{{ t('appName') }}</span>
       <div class="window-actions">
@@ -211,7 +334,7 @@ onMounted(async () => {
       <div class="sidebar-footer">
         <button :title="t('language')" @click="switchLang()">{{ locale === 'zh-CN' ? 'EN' : 'CN' }}</button>
         <small class="sidebar-label">{{ t('aboutVersion') }} {{ version }}</small>
-        <button :aria-label="t('toggleSidebar')" :title="t('toggleSidebar')" @click="sidebar = !sidebar"><ElIcon><Fold /></ElIcon></button>
+        <button :aria-label="t('toggleSidebar')" :title="t('toggleSidebar')" @click="toggleSidebar"><ElIcon><Fold /></ElIcon></button>
       </div>
     </aside>
     <section ref="workspace" :inert="splashVisible" :class="['workspace', { 'map-workspace': active === 'map' }]">
@@ -222,9 +345,11 @@ onMounted(async () => {
       <div v-if="!ready && active !== 'about' && active !== 'settings'" class="notice">
         <ElIcon><WarningFilled /></ElIcon><p>{{ t('setupRequired') }}</p><button class="secondary" @click="active = 'settings'">{{ t('settings') }}</button>
       </div>
+      <p v-if="active === 'map' && previewRetained" class="warning">{{ t('previewRetained') }}</p>
+      <p v-if="active === 'map' && ['fallback', 'untested'].includes(compatibility.state)" class="warning">{{ t('compat_' + compatibility.state) }}</p>
       <Transition name="page">
       <div v-show="active === 'map'" class="map-frame">
-        <iframe v-if="previewUrl" ref="mapIframe" :src="previewUrl" :title="t('localPreview')"></iframe>
+        <iframe v-if="previewUrl && !previewSuspended" ref="mapIframe" @load="syncMapActivity" :src="previewUrl" :title="t('localPreview')"></iframe>
         <div v-else class="map-empty"><ElIcon class="map-icon"><MapLocation /></ElIcon><h2>{{ t(ready ? 'mapPreviewLoading' : 'missing') }}</h2><p>{{ t(ready ? 'mapPreviewDescription' : 'setupRequired') }}</p><button class="primary" @click="active = 'settings'">{{ t('settings') }}</button></div>
       </div>
       </Transition>
@@ -256,6 +381,20 @@ onMounted(async () => {
             <p>{{ t(status.running ? 'scanHint' : 'qrPending') }}</p>
           </div>
         </article>
+        <article class="card live-status-card">
+          <div class="section-heading"><h2>{{ t('liveStatus') }}</h2><span class="muted">{{ t('statusRefresh') }}</span></div>
+          <dl class="live-status-grid">
+            <div><dt>{{ t('gameData') }}</dt><dd :class="game.state === 'live' ? 'ok' : 'muted'">{{ t('game_' + game.state) }}</dd></div>
+            <div><dt>{{ t('lastUpdate') }}</dt><dd>{{ formattedTime(game.updatedAt) }}</dd></div>
+            <div><dt>{{ t('devices') }}</dt><dd>{{ (status.clients || []).length }}</dd></div>
+          </dl>
+          <p v-if="status.configChanged" class="warning">{{ t('restartRequired') }}</p>
+          <p v-if="connectionIssue" class="warning">{{ t('error_' + connectionIssue) }}</p>
+          <p v-if="game.state !== 'live'" class="description">{{ t('gameHint_' + game.state) }}</p>
+          <div class="device-list"><div v-for="client in (status.clients || [])" :key="client.ip"><code>{{ client.ip }}</code><span>{{ t('lastSeen') }} {{ formattedTime(client.lastSeen) }}</span></div></div>
+          <p class="description">{{ t('devicesHint') }}</p>
+          <details class="connection-help"><summary>{{ t('connectionHelp') }}</summary><p class="description">{{ t('connectionHelpText') }}</p></details>
+        </article>
         <section class="guide-section">
           <h2 class="section-title">{{ t('connectionGuide') }}</h2>
           <ol class="steps"><li v-for="step in [1, 2, 3]" :key="step"><span class="step-number">{{ step }}</span><p>{{ t('connectionGuideStep' + step) }}</p></li></ol>
@@ -263,8 +402,9 @@ onMounted(async () => {
         <article class="card network-card">
           <div class="section-heading"><h2>{{ t('networkStatus') }}</h2><span class="muted">{{ t('lanOnly') }}</span></div>
           <dl class="network-details"><div><dt>{{ t('lan') }}</dt><dd>{{ status.ip || '—' }}</dd></div><div><dt>{{ t('port') }}</dt><dd>{{ status.running ? status.port : config.port }}</dd></div></dl>
+          <label class="adapter-select"><span>{{ t('networkAdapter') }}</span><select :value="config.preferredIp || ''" @change="savePreference('preferredIp', $event.target.value)"><option value="">{{ t('automatic') }}</option><option v-for="adapter in networkChoices" :key="adapter.ip" :value="adapter.ip">{{ adapter.name }} · {{ adapter.ip }}{{ adapter.virtual ? ' (' + t('virtualAdapter') + ')' : '' }}</option><option v-if="config.preferredIp && !networkChoices.some(a => a.ip === config.preferredIp)" :value="config.preferredIp">{{ config.preferredIp }} · {{ t('unavailable') }}</option></select></label>
           <p v-if="profiles.some(p => p.NetworkCategory === 'Public')" class="warning">{{ t('publicNetwork') }}</p>
-          <div class="firewall-row"><p class="description">{{ t('firewallHint') }}</p><button class="secondary" @click="firewall">{{ t(firewallDone ? 'firewallDone' : 'firewall') }}</button></div>
+          <div class="firewall-row"><p class="description">{{ t('firewallHint') }}</p><button class="secondary" :disabled="firewallBusy" :aria-busy="firewallBusy" @click="firewall">{{ t(firewallBusy ? 'firewallWorking' : firewallDone ? 'firewallDone' : 'firewall') }}</button></div>
         </article>
       </section>
       </Transition>
@@ -284,9 +424,12 @@ onMounted(async () => {
           </section>
           <section class="settings-section">
             <h2>{{ t('appearanceSection') }}</h2>
+            <div class="setting-row"><label for="ui-scale">{{ t('uiScale') }}</label><div class="setting-control"><select id="ui-scale" :value="config.uiScale" @change="savePreference('uiScale', Number($event.target.value))"><option v-for="scale in [90, 100, 110, 125, 150]" :key="scale" :value="scale">{{ scale }}%</option></select><p class="description">{{ t('uiScaleHint') }}</p></div></div>
+            <div class="setting-row"><label for="close-behavior">{{ t('closeBehavior') }}</label><div class="setting-control"><select id="close-behavior" :value="config.closeBehavior" @change="savePreference('closeBehavior', $event.target.value)"><option value="quit">{{ t('closeQuit') }}</option><option value="tray" :disabled="config.trayAvailable === false">{{ t('closeTray') }}</option></select><p class="description">{{ t('closeHint') }}</p></div></div>
             <div class="setting-row"><span id="theme-label">{{ t('theme') }}</span><div class="setting-control"><div class="language-options theme-options" role="group" aria-labelledby="theme-label" :aria-busy="themeSaving"><button v-for="theme in themeOptions" :key="theme" type="button" :aria-pressed="config.theme === theme" :disabled="themeSaving" @click="switchTheme(theme)">{{ t('theme_' + theme) }}</button></div><p class="description">{{ t('themeHint') }}</p></div></div>
             <div class="setting-row"><span id="language-label">{{ t('language') }}</span><div class="setting-control"><div class="language-options" role="group" aria-labelledby="language-label"><button type="button" :aria-pressed="locale === 'zh-CN'" @click="switchLang('zh-CN')">中文</button><button type="button" :aria-pressed="locale === 'en'" @click="switchLang('en')">English</button></div><p class="description">{{ t('languageHint') }}</p></div></div>
           </section>
+          <section class="settings-section"><h2>{{ t('compatibility') }}</h2><p class="description">{{ t('detectedVersion') }} {{ compatibility.version || '—' }}</p><p class="description" :class="{ warning: compatibility.state === 'fallback' }">{{ t('compat_' + compatibility.state) }}</p></section>
           <footer class="settings-footer"><span class="muted" role="status"><span :key="saved" class="feedback-text">{{ t(saved ? 'settingsSaved' : 'saveHint') }}</span></span><button type="submit" class="primary save-button" :disabled="saving" :aria-busy="saving"><span :key="saveLabel" class="feedback-text">{{ t(saveLabel) }}</span></button></footer>
         </form>
       </section>

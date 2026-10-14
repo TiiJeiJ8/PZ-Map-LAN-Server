@@ -6,6 +6,7 @@ import { networkInterfaces } from 'node:os'
 import { mapPanelTheme } from './map-theme.js'
 import { mapAppearanceScript, normalizeAppearance } from './map-appearance.js'
 import { enhanceMapMotion } from './map-motion.js'
+import { enhanceMapLifecycle } from './map-lifecycle.js'
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.txt': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' }
 const inside = (root, candidate) => { const r = path.resolve(root); const c = path.resolve(candidate); return c === r || c.startsWith(r + path.sep) }
@@ -20,10 +21,12 @@ export function createLanServer(webDir, dataDir, port, _allowLan = true, host = 
   void _allowLan
   let server
   let enhancedHtml
+  let htmlKey
   let appearance = normalizeAppearance()
   const appearanceStreams = new Set()
   const sendAppearance = res => res.write(`data: ${JSON.stringify(appearance)}\n\n`)
   const clients = new Map()
+  const sockets = new Set()
   const mobileEnhancement = `
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <style>html,body,#map{overscroll-behavior:none}#map{touch-action:none}html,body{overflow:hidden}</style>
@@ -44,21 +47,21 @@ export function createLanServer(webDir, dataDir, port, _allowLan = true, host = 
     cv.addEventListener('touchstart', function (e) {
       e.preventDefault();
       if (e.touches.length === 1 && !multiTouch) { mouse('mousedown', point(e.touches[0])); mouseDown = true; }
-      if (e.touches.length >= 2) { multiTouch = true; pinchDistance = distance(e.touches[0], e.touches[1]); }
+      if (e.touches.length >= 2) { if (mouseDown) mouse('mouseup', point(e.touches[0])); mouseDown = false; multiTouch = true; pinchTravel = 0; pinchDistance = distance(e.touches[0], e.touches[1]); }
     }, { passive: false });
     cv.addEventListener('touchmove', function (e) {
       e.preventDefault();
       if (e.touches.length >= 2) {
         var next = distance(e.touches[0], e.touches[1]);
         var delta = next - pinchDistance;
+        pinchDistance = next;
         pinchTravel += delta;
         var step = 72;
-        if (Math.abs(pinchTravel) >= step) {
+        while (Math.abs(pinchTravel) >= step) {
           var p = midpoint(e.touches[0], e.touches[1]);
           var direction = pinchTravel > 0 ? 1 : -1;
           cv.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: p.clientX, clientY: p.clientY, deltaY: -direction * 100 }));
           pinchTravel -= direction * step;
-          pinchDistance = next;
         }
       } else if (e.touches.length === 1 && !multiTouch) mouse('mousemove', point(e.touches[0]));
     }, { passive: false });
@@ -73,16 +76,26 @@ export function createLanServer(webDir, dataDir, port, _allowLan = true, host = 
 }());
 </script>`
   const getEnhancedHtml = async (file) => {
-    if (!enhancedHtml) {
+    const stat = await fs.promises.stat(file)
+    const key = `${stat.mtimeMs}|${stat.size}`
+    if (!enhancedHtml || htmlKey !== key) {
       const source = await fs.promises.readFile(file, 'utf8')
-      enhancedHtml = enhanceMapMotion(source).replace(/<\/head\s*>/i, mapPanelTheme + mobileEnhancement + '</head>')
+      const adapted = enhanceMapMotion(source)
+      enhancedHtml = (embeddedPreferences === null ? adapted : enhanceMapLifecycle(adapted)).replace(/<\/head\s*>/i, mapPanelTheme + mobileEnhancement + '</head>')
+      htmlKey = key
     }
     return enhancedHtml.replace(/<\/head\s*>/i, mapAppearanceScript(appearance, embeddedPreferences) + '</head>')
   }
   const handler = (req, res) => {
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); return res.end() }
     if (!subnetAllowed(req.socket.remoteAddress)) { res.writeHead(403); return res.end('Local network only') }
-    const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+    let parsed
+    try {
+      // Validate Host separately; never use client input as the parser base.
+      const host = new URL(`http://${req.headers.host || 'localhost'}`)
+      if (host.username || host.password || host.pathname !== '/' || host.search || host.hash || !req.url.startsWith('/')) throw new Error('Bad request')
+      parsed = new URL(req.url, 'http://localhost')
+    } catch { res.writeHead(400); return res.end('Bad request') }
     if (parsed.pathname === '/__pz/appearance') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
       if (req.method === 'HEAD') return res.end()
@@ -98,11 +111,16 @@ export function createLanServer(webDir, dataDir, port, _allowLan = true, host = 
     else { res.writeHead(404); return res.end('Not found') }
     let decoded
     try { decoded = decodeURIComponent(relative) } catch { res.writeHead(400); return res.end('Bad request') }
+    if (decoded.includes('\0')) { res.writeHead(400); return res.end('Bad request') }
     const file = path.resolve(root, decoded)
     if (!inside(root, file)) { res.writeHead(403); return res.end('Forbidden') }
-    if (parsed.pathname.startsWith('/data/')) clients.set(req.socket.remoteAddress?.replace('::ffff:', '') || 'unknown', Date.now())
     fs.stat(file, (statErr, stat) => {
       if (statErr || !stat.isFile()) { res.writeHead(404); return res.end('Not found') }
+      if (parsed.pathname.startsWith('/data/')) {
+        const ip = req.socket.remoteAddress?.replace('::ffff:', '') || ''
+        if (ip && ip !== '127.0.0.1' && ip !== '::1') clients.set(ip, Date.now())
+        for (const [address, at] of clients) if (Date.now() - at > 60000) clients.delete(address)
+      }
       const headers = { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff' }
       const isMapHtml = path.basename(file).toLowerCase() === 'index.html' && root === webDir
       if (parsed.pathname.startsWith('/data/') || isMapHtml) headers['Cache-Control'] = 'no-store, max-age=0'
@@ -118,8 +136,13 @@ export function createLanServer(webDir, dataDir, port, _allowLan = true, host = 
     })
   }
   return {
-    start: () => new Promise((resolve, reject) => { server = http.createServer(handler); server.once('error', reject); server.listen(port, host, () => resolve(server.address().port)) }),
-    stop: () => { for (const res of appearanceStreams) res.end(); appearanceStreams.clear(); server?.close() },
+    start: () => new Promise((resolve, reject) => {
+      server = http.createServer(handler)
+      server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+      server.on('error', reject)
+      server.listen(port, host, () => resolve(server.address().port))
+    }),
+    stop: () => { for (const res of appearanceStreams) res.end(); appearanceStreams.clear(); server?.close(); for (const socket of sockets) socket.destroy(); sockets.clear(); clients.clear() },
     setAppearance: preferences => {
       const next = normalizeAppearance(preferences)
       if (JSON.stringify(next) === JSON.stringify(appearance)) return
