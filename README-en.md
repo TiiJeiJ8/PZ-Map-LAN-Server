@@ -34,14 +34,9 @@ Neutral charcoal panels remain distinct from the map's own dark palette.
 
 ## Features
 
-- Automatically finds map files in Steam libraries, with manual directory selection and validation.
-- Live preview inside the app, independent of LAN sharing.
-- Start / stop sharing, copy the access address, or scan a QR code.
-- Touch dragging and pinch zoom for the map, with scrollable settings panels.
-- Chinese / English and Light / Dark / System appearance.
-- Map panels follow the app's language and appearance; connected browsers receive updates without reloading.
-- On first use, fog and settings are closed, the legend is shown, and player follow engages when the game connects. Later panel choices are remembered; server-enforced rules take priority.
-- Configurable port and a Windows Firewall rule shortcut.
+- **A separate map screen:** View the live map in the app or on a phone, tablet, or another computer.
+- **Live sharing over your LAN:** Open the map and player position from a browser address or QR code, with touch dragging and pinch zoom.
+- **An independent companion app:** PZ Map provides the game data; this app adapts and serves the display without modifying game or mod files.
 
 Panel styling and translations are injected into HTTP responses at runtime. **Original mod files are never modified.** Diagnostic logs, map place names, and player notes retain their original content. New panel text introduced by future mod updates may need additional translations.
 
@@ -89,7 +84,11 @@ If you relocated the game's user directory, select the corresponding data folder
 3. On another device on the same network, scan the QR code or open the displayed address, such as `http://192.168.1.10:8123/`.
 4. Drag with one finger and pinch to zoom the map. The gear button opens map settings.
 
-Stopping sharing disconnects other devices from live data; the local preview runs independently. Exiting the app stops all services. Restart sharing after changing the port.
+Stopping sharing disconnects other devices from live data; the local preview runs independently. Exiting the app stops all services. With tray mode selected in Settings, closing the window keeps sharing active; quit from the tray menu. Restart sharing after changing directories or the port.
+
+The local map pauses rendering while another page is open. After the window stays minimized or hidden for 60 seconds, the app unloads the local map and restores its camera and settings when you return to the Map page. LAN sharing continues. This requires a compatible map version; if safe restoration is unavailable, the preview stays loaded.
+
+Sharing status refreshes every 3 seconds. The last update time is the mod heartbeat file's modification time. Recent devices are remote IPs that successfully read data within 60 seconds, grouped by IP; this does not confirm continuous connectivity. The app reports locally observable errors and troubleshooting suggestions, but cannot directly detect causes such as Wi-Fi isolation on a remote device.
 
 Language and appearance changes in **Settings → Interface** save automatically. Light / Dark applies the selected theme to shared pages. System lets each viewing device follow its own system color preference.
 
@@ -136,13 +135,14 @@ If startup reports `Electron uninstall`, ensure installation scripts were not di
 
 ```powershell
 npm run lint
+npm test
 npm run build
 npm run dist
 ```
 
 `dist` builds a Windows x64 NSIS installer and a portable ZIP archive in `release/`. It does not upload or publish them. `release/win-unpacked/` is available for local inspection and need not be published separately.
 
-Before publishing, test the installer and extracted ZIP application: launch, directory selection, persisted theme and language, and access from a real LAN device. Upload Setup.exe, Portable.zip, and their SHA256 checksum file to a GitHub Release manually. Match the version tag to `package.json`, for example `v0.1.0`.
+Before publishing, test the installer and extracted ZIP application: launch, directory selection, persisted theme and language, and access from a real LAN device. Upload Setup.exe, Portable.zip, and their SHA256 checksum file to a GitHub Release manually. Match the version tag to `package.json`, for example `v0.1.26`.
 
 Source layout:
 
