@@ -1,6 +1,16 @@
-# PZ Map LAN Server
+<p align="center">
+  <img src="assets/app-icon.svg" alt="PZ Map LAN Server icon" width="120">
+</p>
 
-[中文](README.md) | English
+<h1 align="center">PZ Map LAN Server</h1>
+
+<p align="center">
+  <a href="https://github.com/TiiJeiJ8/PZ-Map-LAN-Server/releases/latest"><img src="https://img.shields.io/github/v/release/TiiJeiJ8/PZ-Map-LAN-Server?label=latest%20release" alt="Latest GitHub release"></a>
+  <a href="https://github.com/TiiJeiJ8/PZ-Map-LAN-Server/releases"><img src="https://img.shields.io/github/downloads/TiiJeiJ8/PZ-Map-LAN-Server/total?label=downloads" alt="Total GitHub downloads"></a>
+  <a href="https://github.com/TiiJeiJ8/PZ-Map-LAN-Server/blob/main/LICENSE"><img src="https://img.shields.io/github/license/TiiJeiJ8/PZ-Map-LAN-Server" alt="MIT license"></a>
+</p>
+
+<p align="center"><a href="README.md">中文</a> | English</p>
 
 Turn a phone, tablet, or another computer into a live Project Zomboid map display. Share the **PZ Map** mod's web map over your local network and keep it visible on another screen while playing fullscreen on your PC.
 

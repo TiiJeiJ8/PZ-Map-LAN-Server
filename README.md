@@ -1,6 +1,16 @@
-# PZ Map LAN Server
+<p align="center">
+  <img src="assets/app-icon.svg" alt="PZ Map LAN Server 图标" width="120">
+</p>
 
-中文 | [English](README-en.md)
+<h1 align="center">PZ Map LAN Server</h1>
+
+<p align="center">
+  <a href="https://github.com/TiiJeiJ8/PZ-Map-LAN-Server/releases/latest"><img src="https://img.shields.io/github/v/release/TiiJeiJ8/PZ-Map-LAN-Server?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC" alt="GitHub 最新版本"></a>
+  <a href="https://github.com/TiiJeiJ8/PZ-Map-LAN-Server/releases"><img src="https://img.shields.io/github/downloads/TiiJeiJ8/PZ-Map-LAN-Server/total?label=%E7%B4%AF%E8%AE%A1%E4%B8%8B%E8%BD%BD" alt="GitHub 累计下载量"></a>
+  <a href="https://github.com/TiiJeiJ8/PZ-Map-LAN-Server/blob/main/LICENSE"><img src="https://img.shields.io/github/license/TiiJeiJ8/PZ-Map-LAN-Server?label=%E8%AE%B8%E5%8F%AF%E8%AF%81" alt="MIT 许可证"></a>
+</p>
+
+<p align="center">中文 | <a href="README-en.md">English</a></p>
 
 让手机、平板或另一台电脑成为 Project Zomboid 的实时地图屏幕。通过局域网共享 **PZ Map** 模组地图网页，在 PC 上全屏游玩时，抬眼就能查看另一块屏幕上的地图。
 
