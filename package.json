@@ -1,6 +1,6 @@
 {
   "name": "pz-map-lan-server",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Serve the PZ Map web map to devices on a local network.",
   "main": "out/main/index.js",
   "author": "TiiJeiJ8",
@@ -13,15 +13,13 @@
     "test": "node --test tests/*.test.js",
     "dist": "npm run build && electron-builder --win nsis zip --x64 --publish never"
   },
-  "dependencies": {
+  "devDependencies": {
     "@element-plus/icons-vue": "^2.3.2",
+    "@vitejs/plugin-vue": "^5.2.3",
     "electron-store": "^10.0.0",
     "qrcode": "^1.5.4",
     "vue": "^3.5.13",
-    "vue-i18n": "^10.0.7"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.3",
+    "vue-i18n": "^10.0.7",
     "electron": "^35.1.5",
     "electron-builder": "^26.0.12",
     "electron-vite": "^3.1.0",

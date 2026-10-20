@@ -1,5 +1,9 @@
 appId: com.tiijeij8.pzmaplanserver
 productName: PZ Map LAN Server
+# The app supports English and Simplified Chinese.
+electronLanguages:
+  - en-US
+  - zh-CN
 directories:
   output: release
 files:

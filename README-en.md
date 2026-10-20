@@ -152,7 +152,7 @@ npm run dist
 
 `dist` builds a Windows x64 NSIS installer and a portable ZIP archive in `release/`. It does not upload or publish them. `release/win-unpacked/` is available for local inspection and need not be published separately.
 
-Before publishing, test the installer and extracted ZIP application: launch, directory selection, persisted theme and language, and access from a real LAN device. Upload Setup.exe, Portable.zip, and their SHA256 checksum file to a GitHub Release manually. Match the version tag to `package.json`, for example `v0.1.26`.
+Before publishing, test the installer and extracted ZIP application: launch, directory selection, persisted theme and language, and access from a real LAN device. Upload Setup.exe, Portable.zip, and their SHA256 checksum file to a GitHub Release manually. Match the version tag to `package.json`, for example `v0.1.27`.
 
 Source layout:
 

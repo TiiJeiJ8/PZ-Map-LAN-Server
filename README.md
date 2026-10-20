@@ -152,7 +152,7 @@ npm run dist
 
 `dist` 构建 Windows x64 NSIS 安装版和 ZIP 解压版，输出到 `release/`，不会自动上传或发布。`release/win-unpacked/` 用于本地检查，不必作为独立下载文件发布。
 
-发布前请分别验证安装版和 ZIP 解压版的启动、目录选择、主题与语言保存，以及实际局域网设备访问。将 Setup.exe、Portable.zip 和对应的 SHA256 校验文件手动上传到 GitHub Release，并让版本标签与 `package.json` 一致，例如 `v0.1.26`。
+发布前请分别验证安装版和 ZIP 解压版的启动、目录选择、主题与语言保存，以及实际局域网设备访问。将 Setup.exe、Portable.zip 和对应的 SHA256 校验文件手动上传到 GitHub Release，并让版本标签与 `package.json` 一致，例如 `v0.1.27`。
 
 主要源码目录：
 
