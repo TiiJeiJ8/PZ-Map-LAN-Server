@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/app-icon.svg" alt="PZ Map LAN Server 图标" width="120">
+  <img src="assets/app-icon.png" alt="PZ Map LAN Server 图标" width="120">
 </p>
 
 <h1 align="center">PZ Map LAN Server</h1>
